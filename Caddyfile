@@ -1,22 +1,10 @@
 {
-  email {$ACME_EMAIL}
   # Admin API — Highway uses this for dynamic route updates
   admin 0.0.0.0:2019
 }
 
-# Highway dashboard + API
-{$PLATFORM_DOMAIN} {
-  reverse_proxy highway-app:4000
-  encode gzip
-}
-
-# Wildcard for auto-generated service subdomains
-# Requires DNS challenge (Cloudflare token in env)
-*.{$PLATFORM_DOMAIN} {
-  tls {
-    dns cloudflare {$CLOUDFLARE_API_TOKEN}
-  }
-  # Route to Highway — it will proxy to the right container
+# Serve on HTTP only (no domain = no SSL)
+:80 {
   reverse_proxy highway-app:4000
   encode gzip
 }

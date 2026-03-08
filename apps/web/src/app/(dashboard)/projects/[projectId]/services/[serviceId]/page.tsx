@@ -125,10 +125,14 @@ function ServicePage() {
               <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
                 <span className={statusColor(service.status)}>{service.status}</span>
                 {service.gitRepoName && <span className="font-mono">{service.gitRepoName}@{service.gitBranch}</span>}
-                {service.autoDomain && (
-                  <a href={`http://${service.autoDomain}`} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-1 hover:text-foreground transition-colors">
-                    {service.autoDomain}
+                {(service.internalUrl || service.autoDomain) && (
+                  <a
+                    href={service.internalUrl ?? `http://${service.autoDomain}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 hover:text-foreground transition-colors"
+                  >
+                    {service.internalUrl ?? service.autoDomain}
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 )}

@@ -32,20 +32,46 @@ export const proxyService = {
     }
   },
 
-  async upsertRoute(routeId: string, hostname: string, containerIp: string, port: number) {
-    const dial = `${containerIp}:${port}`
-    const route = this.buildRoute(routeId, hostname, dial)
+  async ensureHttpServer() {
+    // Check if the highway HTTP server already exists in Caddy config
+    const res = await fetch(`${env.CADDY_ADMIN}/config/apps/http/servers/highway`)
+    if (res.ok) return
 
-    // Try to update existing route first
+    // Server doesn't exist — initialize Caddy with an empty HTTP server on port 80
+    const initRes = await fetch(`${env.CADDY_ADMIN}/config/apps/http/servers/highway`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ listen: [':80'], routes: [] }),
+    })
+
+    if (!initRes.ok) {
+      // May fail if /config/apps/http doesn't exist either — try creating the full apps/http object
+      const fullRes = await fetch(`${env.CADDY_ADMIN}/config/apps/http`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ servers: { highway: { listen: [':80'], routes: [] } } }),
+      })
+      if (!fullRes.ok) {
+        const text = await fullRes.text()
+        throw new Error(`Failed to initialize Caddy HTTP server: ${text}`)
+      }
+    }
+  },
+
+  async upsertRoute(routeId: string, hostname: string, upstreamDial: string) {
+    const route = this.buildRoute(routeId, hostname, upstreamDial)
+
+    // Try to update existing route first (works if route already exists)
     const updateRes = await fetch(`${env.CADDY_ADMIN}/id/${routeId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(route),
     })
-
     if (updateRes.ok) return
 
-    // Route doesn't exist — add it
+    // Route doesn't exist — ensure server is initialized, then add route
+    await this.ensureHttpServer()
+
     const addRes = await fetch(`${env.CADDY_ADMIN}/config/apps/http/servers/highway/routes/...`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -68,7 +94,7 @@ export const proxyService = {
     const port = service.port ?? 3000
     const hostname = service.autoDomain ?? `${service.slug}.${env.PLATFORM_DOMAIN}`
     const routeId = this.getRouteId(service.id)
-    await this.upsertRoute(routeId, hostname, containerIp, port)
+    await this.upsertRoute(routeId, hostname, `${containerIp}:${port}`)
     return hostname
   },
 
@@ -76,7 +102,7 @@ export const proxyService = {
     const port = service.port ?? 3000
     const suffix = `-domain-${hostname.replace(/\./g, '-')}`
     const routeId = this.getRouteId(service.id, suffix)
-    await this.upsertRoute(routeId, hostname, containerIp, port)
+    await this.upsertRoute(routeId, hostname, `${containerIp}:${port}`)
     return routeId
   },
 

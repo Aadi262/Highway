@@ -63,6 +63,10 @@ export const dockerService = {
         NanoCpus: Math.round(((service.cpuLimit ?? 50) / 100) * 1e9),
         NetworkMode: networkName,
         Binds: volumes.map((v) => `${v.dockerVolumeName}:${v.mountPath}`),
+        // Auto-assign a host port so the service is reachable at VPS_IP:hostPort
+        PortBindings: {
+          [`${service.port ?? 3000}/tcp`]: [{ HostPort: '' }],
+        },
       },
       Healthcheck: service.healthCheckPath
         ? {

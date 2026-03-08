@@ -82,16 +82,27 @@ export const deployService = {
       await log(deployment.id, ok('Container ready'))
     }
 
-    // [8/9] Update Caddy route
+    // Get the host port Docker auto-assigned — this is the direct reachable URL
+    const freshInfo = await container.inspect()
+    const hostPort = freshInfo.NetworkSettings.Ports[`${service.port ?? 3000}/tcp`]?.[0]?.HostPort
+    const platformDomain = process.env.PLATFORM_DOMAIN ?? '194.163.146.149'
+    const directUrl = hostPort ? `http://${platformDomain}:${hostPort}` : null
+
+    // [8/9] Update Caddy route (non-blocking — don't fail deploy if Caddy errors)
     await log(deployment.id, step(8, 'Updating reverse proxy'))
     const containerIp = await dockerService.getContainerIp(newContainerId, networkName)
     if (containerIp && service.port) {
-      await proxyService.updateServiceRoute(service, containerIp)
-      const domain = service.autoDomain ?? `${service.slug}.${process.env.PLATFORM_DOMAIN}`
-      await log(deployment.id, ok(`Traffic routed → ${containerIp}:${service.port}`))
-      await log(deployment.id, info(`  URL: http://${domain}`))
-    } else {
-      await log(deployment.id, info('  No port configured — skipping Caddy route'))
+      try {
+        await proxyService.updateServiceRoute(service, containerIp)
+        const domain = service.autoDomain ?? `${service.slug}.${platformDomain}`
+        await log(deployment.id, ok(`Caddy route → ${containerIp}:${service.port}`))
+        await log(deployment.id, info(`  Domain: http://${domain}`))
+      } catch (caddyErr: any) {
+        await log(deployment.id, `\x1b[33m⚠\x1b[0m Caddy route skipped: ${caddyErr.message}`, 'system')
+      }
+    }
+    if (directUrl) {
+      await log(deployment.id, ok(`Direct URL: ${directUrl}`))
     }
 
     // [9/9] Stop old container
@@ -106,11 +117,12 @@ export const deployService = {
 
     const deployDuration = Math.round((Date.now() - deployStart) / 1000)
 
-    // Update DB records
+    // Update DB records — store direct URL in internalUrl for frontend display
     await db.update(services).set({
       containerId: newContainerId,
-      containerName: containerInfo.Name.replace('/', ''),
+      containerName: freshInfo.Name.replace('/', ''),
       status: 'running',
+      internalUrl: directUrl ?? undefined,
       lastDeployedAt: new Date(),
       lastDeploymentId: deployment.id,
       updatedAt: new Date(),
@@ -123,10 +135,10 @@ export const deployService = {
       finishedAt: new Date(),
     }).where(eq(deployments.id, deployment.id))
 
-    const domain = service.autoDomain ?? `${service.slug}.${process.env.PLATFORM_DOMAIN}`
+    const liveUrl = directUrl ?? `http://${service.autoDomain ?? `${service.slug}.${platformDomain}`}`
     await log(deployment.id, `\x1b[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m`)
     await log(deployment.id, `\x1b[32m\x1b[1m✓ Deployment complete in ${deployDuration}s\x1b[0m`)
-    await log(deployment.id, `\x1b[1m  Live at: http://${domain}\x1b[0m`)
+    await log(deployment.id, `\x1b[1m  Live at: ${liveUrl}\x1b[0m`)
     await log(deployment.id, `\x1b[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m`)
   },
 

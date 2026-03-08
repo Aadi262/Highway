@@ -1,11 +1,8 @@
 FROM oven/bun:1.1-alpine AS base
 WORKDIR /app
 
-# Install git + railpack + curl (needed at build/runtime)
+# Install git + curl (needed at build/runtime)
 RUN apk add --no-cache git curl
-
-# Install Railpack
-RUN curl -fsSL https://railpack.sh/install.sh | sh
 
 # Copy package files
 COPY package.json turbo.json bun.lockb* ./
@@ -20,6 +17,10 @@ RUN bun install --frozen-lockfile
 # Copy source
 COPY packages/ ./packages/
 COPY apps/ ./apps/
+
+# Build arg for Next.js (must be set at build time)
+ARG NEXT_PUBLIC_API_URL=http://localhost:4000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Build web app
 RUN bun run --filter @highway/web build

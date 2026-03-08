@@ -10,7 +10,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "2019:2019"  # Admin API (bind to 127.0.0.1 in prod!)
+      - "2019:2019"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -19,7 +19,6 @@ services:
       - highway-public
     environment:
       PLATFORM_DOMAIN: ${PLATFORM_DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL}
 
   postgres:
     image: postgres:16-alpine
@@ -28,7 +27,7 @@ services:
     environment:
       POSTGRES_DB: highway
       POSTGRES_USER: highway
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: highway
     volumes:
       - highway-pg-data:/var/lib/postgresql/data
     networks:
@@ -43,18 +42,13 @@ services:
     image: redis:7-alpine
     container_name: highway-redis
     restart: unless-stopped
-    command: >
-      redis-server
-      --requirepass ${REDIS_PASSWORD}
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-      --appendonly yes
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
     volumes:
       - highway-redis-data:/data
     networks:
       - highway-internal
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -63,26 +57,28 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://${PLATFORM_DOMAIN}:4000
     container_name: highway-app
     restart: unless-stopped
+    ports:
+      - "4000:4000"
+      - "3000:3000"
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://highway:${DB_PASSWORD}@postgres:5432/highway
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
       PLATFORM_DOMAIN: ${PLATFORM_DOMAIN}
-      API_URL: https://${PLATFORM_DOMAIN}
-      WEB_URL: https://${PLATFORM_DOMAIN}
-      CADDY_ADMIN: http://caddy:2019
-      DOCKER_SOCKET: /var/run/docker.sock
+      API_URL: ${API_URL}
+      WEB_URL: ${WEB_URL}
+      CADDY_ADMIN: http://highway-caddy:2019
     volumes:
-      # Docker socket — lets Highway manage containers
       - /var/run/docker.sock:/var/run/docker.sock
-      # Build workspace
       - highway-builds:/tmp/highway-builds
     networks:
       - highway-public
@@ -105,7 +101,7 @@ networks:
   highway-internal:
     name: highway-internal
     driver: bridge
-    internal: true  # No internet access from platform DB/Redis
+    internal: true
 
 volumes:
   caddy-data:

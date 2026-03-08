@@ -25,9 +25,7 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 # Build web app
 RUN bun run --filter @highway/web build
 
-# The API runs via Bun directly (no build step needed)
-
 EXPOSE 4000 3000
 
-# Start script runs both API and serves Next.js
-CMD ["bun", "run", "start:prod"]
+# Run DB migrations then start API + Next.js concurrently
+CMD sh -c "cd /app/packages/db && bun run src/migrate.ts 2>/dev/null || true; (cd /app/apps/api && bun run src/index.ts) & (cd /app/apps/web && bun run start) & wait"

@@ -34,7 +34,7 @@ async function streamProc(
 }
 
 export const buildService = {
-  async build(service: Service, deployment: Deployment, envVars: Record<string, string> = {}): Promise<string> {
+  async build(service: Service, deployment: Deployment, envVars: string[] = []): Promise<string> {
     const buildDir = join(DOCKER.BUILD_DIR, deployment.id)
     const imageName = `${DOCKER.IMAGE_PREFIX}/${service.slug}:${deployment.id.slice(0, 8)}`
 
@@ -76,7 +76,7 @@ export const buildService = {
           await log(deployment.id, `\x1b[33m⚠\x1b[0m Railpack build failed, falling back to Dockerfile build`, 'system')
           await log(deployment.id, `  Reason: ${(railpackErr as Error).message.slice(0, 200)}`, 'system')
           await log(deployment.id, step(3, 'Auto-generating Dockerfile'), 'system')
-          await this.buildWithFallbackDockerfile(sourceDir, imageName, service, deployment)
+          await this.buildWithFallbackDockerfile(sourceDir, imageName, service, deployment, envVars)
         }
       }
 
@@ -127,24 +127,26 @@ export const buildService = {
     if (exitCode !== 0) throw new Error(`Git clone failed: ${buf}`)
   },
 
-  async buildWithRailpack(sourceDir: string, imageName: string, service: Service, deployment: Deployment, envVars: Record<string, string> = {}) {
+  async buildWithRailpack(sourceDir: string, imageName: string, service: Service, deployment: Deployment, envVars: string[] = []) {
     const args = ['railpack', 'build', sourceDir, '--name', imageName]
     if (service.startCommand) args.push('--start-cmd', service.startCommand)
     if (service.installCommand) args.push('--install-cmd', service.installCommand)
-    // BuildKit layer caching — speeds up repeat builds (railpack uses --cache-key as a namespace)
+    // BuildKit layer caching — speeds up repeat builds
     args.push('--cache-key', service.slug)
     // Pass env vars into build so frameworks like Next.js can access them at build time
-    for (const [key, value] of Object.entries(envVars)) {
-      args.push('--env', `${key}=${value}`)
+    for (const envEntry of envVars) {
+      args.push('--env', envEntry)
     }
 
+    // NOTE: Do NOT set BUILDKIT_HOST here. When using an external BuildKit daemon,
+    // images are stored in BuildKit's internal store and never appear in `docker images`.
+    // Let railpack use Docker's built-in BuildKit so images land in the Docker daemon.
     const proc = Bun.spawn(args, {
       stdout: 'pipe',
       stderr: 'pipe',
       env: {
         ...process.env,
-        BUILDKIT_HOST: process.env.BUILDKIT_HOST ?? 'docker-container://buildkit',
-        PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}`,
+        PATH: `${process.env.HOME}/.local/bin:/root/.local/bin:${process.env.PATH}`,
       },
     })
 
@@ -268,7 +270,7 @@ export const buildService = {
     await log(deployment.id, `\x1b[32m✓\x1b[0m Static site image built: ${imageName}`, 'system')
   },
 
-  async buildWithFallbackDockerfile(sourceDir: string, imageName: string, service: Service, deployment: Deployment) {
+  async buildWithFallbackDockerfile(sourceDir: string, imageName: string, service: Service, deployment: Deployment, envVars: string[] = []) {
     // Detect the project type from files present
     const hasPackageJson = existsSync(join(sourceDir, 'package.json'))
     const hasNextConfig = existsSync(join(sourceDir, 'next.config.js')) || existsSync(join(sourceDir, 'next.config.mjs')) || existsSync(join(sourceDir, 'next.config.ts'))
@@ -276,6 +278,15 @@ export const buildService = {
     const hasBunLock = existsSync(join(sourceDir, 'bun.lock')) || existsSync(join(sourceDir, 'bun.lockb'))
     const hasPnpmLock = existsSync(join(sourceDir, 'pnpm-lock.yaml'))
     const hasRequirements = existsSync(join(sourceDir, 'requirements.txt'))
+
+    // Parse envVars string[] into Record for docker buildargs
+    const buildArgsRecord: Record<string, string> = {}
+    for (const entry of envVars) {
+      const eqIdx = entry.indexOf('=')
+      if (eqIdx > 0) {
+        buildArgsRecord[entry.slice(0, eqIdx)] = entry.slice(eqIdx + 1)
+      }
+    }
 
     let dockerfileContent: string
     const port = service.port ?? 3000
@@ -285,12 +296,16 @@ export const buildService = {
       const pm = hasBunLock ? 'bun' : hasYarnLock ? 'yarn' : hasPnpmLock ? 'pnpm' : 'npm'
       const install = pm === 'bun' ? 'bun install --frozen-lockfile' : pm === 'yarn' ? 'yarn install --frozen-lockfile' : pm === 'pnpm' ? 'npm i -g pnpm && pnpm install --frozen-lockfile' : 'npm ci'
       const lockfile = pm === 'bun' ? 'bun.lock*' : pm === 'yarn' ? 'yarn.lock' : pm === 'pnpm' ? 'pnpm-lock.yaml' : 'package-lock.json*'
+      // Generate ARG/ENV lines for each build-time env var (needed for Next.js static generation)
+      const argLines = Object.keys(buildArgsRecord).map(k => `ARG ${k}\nENV ${k}=$${k}`).join('\n')
       dockerfileContent = `FROM node:20-alpine
 WORKDIR /app
 COPY package.json ${lockfile} ./
 RUN ${install}
 COPY . .
-RUN npm run build
+${argLines}
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build 2>&1 || (echo "Build failed — check logs above" && exit 1)
 EXPOSE ${port}
 ENV PORT=${port} NODE_ENV=production
 CMD ["npm", "start"]`
@@ -333,6 +348,7 @@ CMD ${JSON.stringify(startCmd.split(' '))}`
     const buildStream = await docker.buildImage(tarStream as any, {
       t: imageName,
       dockerfile: 'Dockerfile.highway-fallback',
+      buildargs: buildArgsRecord,
     })
 
     await new Promise<void>((resolve, reject) => {

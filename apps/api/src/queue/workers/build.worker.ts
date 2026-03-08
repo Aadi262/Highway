@@ -69,7 +69,10 @@ export function startBuildWorker() {
       await log(deployment.id, `\x1b[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m`, 'system')
 
       try {
-        const imageName = await buildService.build(service, deployment)
+        // Fetch env vars before build so they can be injected at build time
+        // (required for frameworks like Next.js that run code during `next build`)
+        const envVars = await deployService.getDecryptedEnvVars(serviceId)
+        const imageName = await buildService.build(service, deployment, envVars)
         const buildDuration = Math.round((Date.now() - buildStart) / 1000)
 
         await db.update(deployments).set({
@@ -79,8 +82,6 @@ export function startBuildWorker() {
         }).where(eq(deployments.id, deployment.id))
 
         await log(deployment.id, step(`Build complete in ${buildDuration}s — starting deployment`), 'system')
-
-        const envVars = await deployService.getDecryptedEnvVars(serviceId)
 
         await deployQueue.add('deploy', {
           serviceId,

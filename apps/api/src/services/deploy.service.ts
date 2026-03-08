@@ -7,12 +7,10 @@ import { eq } from 'drizzle-orm'
 import { LIMITS } from '@highway/shared'
 import type { Service, Deployment } from '@highway/db'
 
-const step = (n: number, total: number, msg: string) =>
-  `\x1b[1m\x1b[36m[${n}/${total}]\x1b[0m \x1b[1m${msg}\x1b[0m`
+const step = (n: number, msg: string) =>
+  `\x1b[1m\x1b[36m[${n}/9]\x1b[0m \x1b[1m${msg}\x1b[0m`
 const ok = (msg: string) => `\x1b[32m✓\x1b[0m ${msg}`
 const info = (msg: string) => `\x1b[2m${msg}\x1b[0m`
-
-const TOTAL = 5
 
 export const deployService = {
   async deploy(params: {
@@ -24,7 +22,7 @@ export const deployService = {
     const { service, deployment, imageName } = params
     const deployStart = Date.now()
 
-    // Auto-inject system env vars (PORT, NODE_ENV, RAILWAY_ENVIRONMENT)
+    // Auto-inject system env vars (PORT, NODE_ENV)
     const systemVars = [
       `PORT=${service.port ?? 3000}`,
       'NODE_ENV=production',
@@ -33,15 +31,15 @@ export const deployService = {
     // User vars override system vars
     const envVars = [...systemVars, ...params.envVars]
 
-    // 1. Ensure project-level Docker network
-    await log(deployment.id, step(1, TOTAL, 'Setting up project network'))
+    // [6/9] Ensure project-level Docker network
+    await log(deployment.id, step(6, 'Setting up project network'))
     const networkName = await dockerService.ensureProjectNetwork(
       await this.getProjectSlug(service.projectId)
     )
     await log(deployment.id, ok(`Network ready: ${networkName}`))
 
-    // 2. Start new container
-    await log(deployment.id, step(2, TOTAL, `Creating container from ${imageName.split(':')[1] ?? imageName}`))
+    // [7/9] Start new container
+    await log(deployment.id, step(7, `Creating container from ${imageName.split(':')[1] ?? imageName}`))
     await log(deployment.id, info(`  Image:   ${imageName}`))
     await log(deployment.id, info(`  Port:    ${service.port ?? 3000}`))
     await log(deployment.id, info(`  Memory:  ${service.memoryLimitMb ?? 512}MB`))
@@ -58,13 +56,12 @@ export const deployService = {
     const newContainerId = containerInfo.Id
     await log(deployment.id, ok(`Container started: ${newContainerId.slice(0, 12)}`))
 
-    // 3. Health check
-    await log(deployment.id, step(3, TOTAL, 'Running health check'))
+    // Health check
     if (service.healthCheckPath) {
-      await log(deployment.id, info(`  Path: ${service.healthCheckPath}`))
-      const healthy = await dockerService.waitForHealthy(newContainerId, LIMITS.HEALTH_CHECK_TIMEOUT_MS)
+      await log(deployment.id, info(`  Health check: ${service.healthCheckPath}`))
+      const { healthy, warning } = await dockerService.waitForHealthy(newContainerId, LIMITS.HEALTH_CHECK_TIMEOUT_MS)
+      if (warning) await log(deployment.id, `\x1b[33m⚠\x1b[0m ${warning}`)
       if (!healthy) {
-        // Capture container logs before removing
         try {
           const ctr = dockerService.docker.getContainer(newContainerId)
           const logStream = await ctr.logs({ stdout: true, stderr: true, tail: 20 })
@@ -75,19 +72,18 @@ export const deployService = {
               await log(deployment.id, `  ${line}`, 'stderr')
             }
           }
-        } catch {}
+        } catch { }
         await dockerService.removeContainer(newContainerId, true)
         throw new Error(`Health check failed after ${LIMITS.HEALTH_CHECK_TIMEOUT_MS / 1000}s — container rolled back`)
       }
       await log(deployment.id, ok('Health check passed'))
     } else {
-      await log(deployment.id, info('  No health check configured — waiting 3s for startup'))
       await Bun.sleep(3000)
       await log(deployment.id, ok('Container ready'))
     }
 
-    // 4. Update Caddy route
-    await log(deployment.id, step(4, TOTAL, 'Updating reverse proxy'))
+    // [8/9] Update Caddy route
+    await log(deployment.id, step(8, 'Updating reverse proxy'))
     const containerIp = await dockerService.getContainerIp(newContainerId, networkName)
     if (containerIp && service.port) {
       await proxyService.updateServiceRoute(service, containerIp)
@@ -98,8 +94,8 @@ export const deployService = {
       await log(deployment.id, info('  No port configured — skipping Caddy route'))
     }
 
-    // 5. Stop old container
-    await log(deployment.id, step(5, TOTAL, 'Cleaning up old container'))
+    // [9/9] Stop old container
+    await log(deployment.id, step(9, 'Cleaning up old container'))
     const oldContainerId = service.containerId
     if (oldContainerId && oldContainerId !== newContainerId) {
       await dockerService.removeContainer(oldContainerId)

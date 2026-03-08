@@ -7,6 +7,14 @@ import { eq } from 'drizzle-orm'
 import { LIMITS } from '@highway/shared'
 import type { Service, Deployment } from '@highway/db'
 
+const step = (n: number, total: number, msg: string) =>
+  `\x1b[1m\x1b[36m[${n}/${total}]\x1b[0m \x1b[1m${msg}\x1b[0m`
+const ok = (msg: string) => `\x1b[32m✓\x1b[0m ${msg}`
+const fail = (msg: string) => `\x1b[31m✗\x1b[0m ${msg}`
+const info = (msg: string) => `\x1b[2m${msg}\x1b[0m`
+
+const TOTAL = 5
+
 export const deployService = {
   async deploy(params: {
     service: Service
@@ -17,15 +25,19 @@ export const deployService = {
     const { service, deployment, imageName, envVars } = params
     const deployStart = Date.now()
 
-    await log(deployment.id, `🚀 Deploying ${service.name}...`)
-
     // 1. Ensure project-level Docker network
+    await log(deployment.id, step(1, TOTAL, 'Setting up project network'))
     const networkName = await dockerService.ensureProjectNetwork(
       await this.getProjectSlug(service.projectId)
     )
+    await log(deployment.id, ok(`Network ready: ${networkName}`))
 
-    // 2. Start new container (not yet in Caddy — blue/green pattern)
-    await log(deployment.id, `📦 Starting container from image ${imageName}...`)
+    // 2. Start new container
+    await log(deployment.id, step(2, TOTAL, `Creating container from ${imageName.split(':')[1] ?? imageName}`))
+    await log(deployment.id, info(`  Image:   ${imageName}`))
+    await log(deployment.id, info(`  Port:    ${service.port ?? 3000}`))
+    await log(deployment.id, info(`  Memory:  ${service.memoryLimitMb ?? 512}MB`))
+
     const container = await dockerService.createContainer({
       service,
       deployment,
@@ -36,41 +48,61 @@ export const deployService = {
 
     const containerInfo = await container.inspect()
     const newContainerId = containerInfo.Id
-    await log(deployment.id, `✅ Container started: ${newContainerId.slice(0, 12)}`)
+    await log(deployment.id, ok(`Container started: ${newContainerId.slice(0, 12)}`))
 
-    // 3. Health check (if configured)
+    // 3. Health check
+    await log(deployment.id, step(3, TOTAL, 'Running health check'))
     if (service.healthCheckPath) {
-      await log(deployment.id, `🏥 Waiting for health check on ${service.healthCheckPath}...`)
+      await log(deployment.id, info(`  Path: ${service.healthCheckPath}`))
       const healthy = await dockerService.waitForHealthy(newContainerId, LIMITS.HEALTH_CHECK_TIMEOUT_MS)
-
       if (!healthy) {
+        // Capture container logs before removing
+        try {
+          const ctr = dockerService.docker.getContainer(newContainerId)
+          const logStream = await ctr.logs({ stdout: true, stderr: true, tail: 20 })
+          const logsText = logStream.toString()
+          if (logsText.trim()) {
+            await log(deployment.id, `\x1b[31mContainer output:\x1b[0m`)
+            for (const line of logsText.split('\n').filter(Boolean)) {
+              await log(deployment.id, `  ${line}`, 'stderr')
+            }
+          }
+        } catch {}
         await dockerService.removeContainer(newContainerId, true)
-        throw new Error('Health check failed — new container rolled back')
+        throw new Error(`Health check failed after ${LIMITS.HEALTH_CHECK_TIMEOUT_MS / 1000}s — container rolled back`)
       }
-      await log(deployment.id, `✅ Health check passed`)
+      await log(deployment.id, ok('Health check passed'))
     } else {
-      // Small pause for app to start listening
+      await log(deployment.id, info('  No health check configured — waiting 3s for startup'))
       await Bun.sleep(3000)
+      await log(deployment.id, ok('Container ready'))
     }
 
-    // 4. Get container IP and update Caddy
+    // 4. Update Caddy route
+    await log(deployment.id, step(4, TOTAL, 'Updating reverse proxy'))
     const containerIp = await dockerService.getContainerIp(newContainerId, networkName)
     if (containerIp && service.port) {
       await proxyService.updateServiceRoute(service, containerIp)
-      await log(deployment.id, `🌐 Traffic routed to new container`)
+      const domain = service.autoDomain ?? `${service.slug}.${process.env.PLATFORM_DOMAIN}`
+      await log(deployment.id, ok(`Traffic routed → ${containerIp}:${service.port}`))
+      await log(deployment.id, info(`  URL: http://${domain}`))
+    } else {
+      await log(deployment.id, info('  No port configured — skipping Caddy route'))
     }
 
-    // 5. Stop old container (graceful)
+    // 5. Stop old container
+    await log(deployment.id, step(5, TOTAL, 'Cleaning up old container'))
     const oldContainerId = service.containerId
     if (oldContainerId && oldContainerId !== newContainerId) {
-      await log(deployment.id, `♻️ Stopping previous container...`)
       await dockerService.removeContainer(oldContainerId)
-      await log(deployment.id, `✅ Previous container stopped`)
+      await log(deployment.id, ok(`Stopped previous container ${oldContainerId.slice(0, 12)}`))
+    } else {
+      await log(deployment.id, info('  No previous container to stop'))
     }
 
     const deployDuration = Math.round((Date.now() - deployStart) / 1000)
 
-    // 6. Update service record
+    // Update DB records
     await db.update(services).set({
       containerId: newContainerId,
       containerName: containerInfo.Name.replace('/', ''),
@@ -80,7 +112,6 @@ export const deployService = {
       updatedAt: new Date(),
     }).where(eq(services.id, service.id))
 
-    // 7. Update deployment record
     await db.update(deployments).set({
       status: 'success',
       containerId: newContainerId,
@@ -88,7 +119,11 @@ export const deployService = {
       finishedAt: new Date(),
     }).where(eq(deployments.id, deployment.id))
 
-    await log(deployment.id, `✅ Deployment complete in ${deployDuration}s!`)
+    const domain = service.autoDomain ?? `${service.slug}.${process.env.PLATFORM_DOMAIN}`
+    await log(deployment.id, `\x1b[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m`)
+    await log(deployment.id, `\x1b[32m\x1b[1m✓ Deployment complete in ${deployDuration}s\x1b[0m`)
+    await log(deployment.id, `\x1b[1m  Live at: http://${domain}\x1b[0m`)
+    await log(deployment.id, `\x1b[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m`)
   },
 
   async getProjectSlug(projectId: string): Promise<string> {
@@ -101,7 +136,7 @@ export const deployService = {
     return project.slug
   },
 
-  async rollback(serviceId: string, targetDeploymentId: string, userId: string) {
+  async rollback(serviceId: string, targetDeploymentId: string, _userId: string) {
     const [target] = await db.select().from(deployments)
       .where(eq(deployments.id, targetDeploymentId))
       .limit(1)
@@ -115,7 +150,6 @@ export const deployService = {
 
     if (!service) throw new Error('Service not found')
 
-    // Create a new deployment record marked as rollback
     const [rollbackDeploy] = await db.insert(deployments).values({
       serviceId,
       status: 'deploying',
@@ -130,7 +164,6 @@ export const deployService = {
       startedAt: new Date(),
     }).returning()
 
-    // Queue the deploy directly (image already exists)
     const { deployQueue } = await import('../queue/queues')
     const envVars = await this.getDecryptedEnvVars(serviceId)
 

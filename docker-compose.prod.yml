@@ -53,6 +53,14 @@ services:
       timeout: 5s
       retries: 5
 
+  buildkit:
+    image: moby/buildkit:latest
+    container_name: buildkit
+    privileged: true
+    restart: unless-stopped
+    networks:
+      - highway-public
+
   app:
     build:
       context: .
@@ -77,6 +85,7 @@ services:
       API_URL: ${API_URL}
       WEB_URL: ${WEB_URL}
       CADDY_ADMIN: http://highway-caddy:2019
+      BUILDKIT_HOST: docker-container://buildkit
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - highway-builds:/tmp/highway-builds
@@ -88,6 +97,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      buildkit:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:4000/health || exit 1"]
       interval: 30s

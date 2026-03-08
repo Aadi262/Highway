@@ -291,6 +291,19 @@ export const templates = pgTable('templates', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
+// ─── Deployment Logs ─────────────────────────────────────────────────────────
+
+export const deploymentLogs = pgTable('deployment_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  deploymentId: uuid('deployment_id').notNull().references(() => deployments.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  stream: text('stream').notNull().default('stdout'), // 'stdout' | 'stderr' | 'system'
+  timestamp: timestamp('timestamp').defaultNow().notNull(),
+}, (t) => ({
+  deploymentIdIdx: index('deployment_logs_deployment_id_idx').on(t.deploymentId),
+  deploymentTimeIdx: index('deployment_logs_deployment_time_idx').on(t.deploymentId, t.timestamp),
+}))
+
 // ─── Relations ───────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -313,8 +326,13 @@ export const servicesRelations = relations(services, ({ one, many }) => ({
   volumes: many(volumes),
 }))
 
-export const deploymentsRelations = relations(deployments, ({ one }) => ({
+export const deploymentsRelations = relations(deployments, ({ one, many }) => ({
   service: one(services, { fields: [deployments.serviceId], references: [services.id] }),
+  logs: many(deploymentLogs),
+}))
+
+export const deploymentLogsRelations = relations(deploymentLogs, ({ one }) => ({
+  deployment: one(deployments, { fields: [deploymentLogs.deploymentId], references: [deployments.id] }),
 }))
 
 export const databaseServicesRelations = relations(databaseServices, ({ one }) => ({
@@ -339,6 +357,7 @@ export type Metric = typeof metrics.$inferSelect
 export type Volume = typeof volumes.$inferSelect
 export type AuditLog = typeof auditLogs.$inferSelect
 export type Template = typeof templates.$inferSelect
+export type DeploymentLog = typeof deploymentLogs.$inferSelect
 
 export interface TemplateServiceConfig {
   name: string

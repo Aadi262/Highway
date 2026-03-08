@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { gitApi, servicesApi } from '@/lib/api'
 import {
   X,
@@ -63,6 +64,7 @@ const SERVICE_TYPES = [
 ]
 
 export function AddServiceModal({ projectId, onClose, onCreated }: Props) {
+  const router = useRouter()
   const [step, setStep] = useState<'repo' | 'config'>('repo')
   const [repos, setRepos] = useState<any[]>([])
   const [filtered, setFiltered] = useState<any[]>([])
@@ -131,11 +133,14 @@ export function AddServiceModal({ projectId, onClose, onCreated }: Props) {
         autoDeploy: form.autoDeploy,
         healthCheckPath: form.healthCheckPath || undefined,
       })
-      // Immediately trigger a deploy after creation
-      await servicesApi.deploy(service.id).catch(() => {})
-      toast.success(`Deploying "${form.name}"…`)
+      // Immediately trigger deploy and get deploymentId for live log redirect
+      const deployRes = await servicesApi.deploy(service.id).catch(() => null)
+      toast.success(`Deploying "${form.name}" — opening live logs`)
       onCreated()
       onClose()
+      // Navigate to service page with live logs open
+      const deploymentParam = deployRes?.deploymentId ? `&deploymentId=${deployRes.deploymentId}` : ''
+      router.push(`/projects/${projectId}/services/${service.id}?tab=logs${deploymentParam}`)
     } catch (err: any) {
       toast.error(err.message)
     } finally {

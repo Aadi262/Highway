@@ -138,13 +138,22 @@ app.post('/services/:id/deploy', async (c) => {
   if (!service) return c.json({ error: 'Not found' }, 404)
   if (!service.gitRepoUrl) return c.json({ error: 'No repository connected' }, 400)
 
+  // Create deployment record immediately so frontend can stream logs right away
+  const [deployment] = await db.insert(deployments).values({
+    serviceId: service.id,
+    status: 'queued',
+    trigger: 'manual',
+    branch: service.gitBranch ?? 'main',
+  }).returning()
+
   const job = await buildQueue.add('build', {
     serviceId: service.id,
+    deploymentId: deployment.id,
     trigger: 'manual',
     branch: service.gitBranch ?? 'main',
   })
 
-  return c.json({ ok: true, jobId: job.id })
+  return c.json({ ok: true, jobId: job.id, deploymentId: deployment.id })
 })
 
 // POST /api/services/:id/stop

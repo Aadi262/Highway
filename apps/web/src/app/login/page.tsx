@@ -1,13 +1,13 @@
 'use client'
 
-import { useEffect } from 'react'
+import { Suspense, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/lib/store'
 import { auth } from '@/lib/api'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 
-export default function LoginPage() {
+function LoginContent() {
   const { token } = useAuthStore()
   const router = useRouter()
   const params = useSearchParams()
@@ -61,6 +61,18 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   )
 }
 

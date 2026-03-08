@@ -1,8 +1,16 @@
-FROM oven/bun:1.1-alpine AS base
+FROM oven/bun:1.1-debian AS base
 WORKDIR /app
 
-# Install git + curl (needed at build/runtime)
-RUN apk add --no-cache git curl
+# Install git + curl + docker CLI (needed at build/runtime)
+# Debian base is required because railpack ships a glibc binary (fails on Alpine/musl)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl bash ca-certificates docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install railpack and verify it works
+RUN curl -sSL https://raw.githubusercontent.com/railwayapp/railpack/main/install.sh | bash \
+    && echo "Railpack installed at: $(which railpack)" \
+    && railpack --version
 
 # Copy package files
 COPY package.json turbo.json bun.lockb* ./

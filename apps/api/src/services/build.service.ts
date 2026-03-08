@@ -1,12 +1,15 @@
-import { mkdirSync, rmSync } from 'fs'
+import { mkdirSync, rmSync, existsSync } from 'fs'
 import { join } from 'path'
 import { docker } from '../lib/docker'
 import { log } from './log.service'
 import { DOCKER, LIMITS } from '@highway/shared'
 import type { Service, Deployment } from '@highway/db'
 
-const step = (n: number, total: number, msg: string) =>
-  `\x1b[1m\x1b[36m[${n}/${total}]\x1b[0m \x1b[1m${msg}\x1b[0m`
+// Unified 9-step pipeline (steps 1-5 = build, 6-9 = deploy)
+const TOTAL = 9
+const step = (n: number, msg: string) =>
+  `\x1b[1m\x1b[36m[${n}/${TOTAL}]\x1b[0m \x1b[1m${msg}\x1b[0m`
+
 
 async function streamProc(
   proc: ReturnType<typeof Bun.spawn>,
@@ -31,16 +34,15 @@ async function streamProc(
 }
 
 export const buildService = {
-  async build(service: Service, deployment: Deployment): Promise<string> {
+  async build(service: Service, deployment: Deployment, envVars: Record<string, string> = {}): Promise<string> {
     const buildDir = join(DOCKER.BUILD_DIR, deployment.id)
     const imageName = `${DOCKER.IMAGE_PREFIX}/${service.slug}:${deployment.id.slice(0, 8)}`
-    const TOTAL_STEPS = service.buildSystem === 'dockerfile' ? 3 : 4
 
     try {
       mkdirSync(buildDir, { recursive: true })
 
-      // ── Step 1: Clone ────────────────────────────────────────────────
-      await log(deployment.id, step(1, TOTAL_STEPS, `Cloning ${service.gitRepoName ?? 'repository'}@${service.gitBranch ?? 'main'}`), 'system')
+      // ── [1/9] Clone ───────────────────────────────────────────────────
+      await log(deployment.id, step(1, `Cloning ${service.gitRepoName ?? 'repository'}@${service.gitBranch ?? 'main'}`), 'system')
       await this.cloneRepo(service, deployment, buildDir)
       await log(deployment.id, `\x1b[32m✓\x1b[0m Clone complete`, 'system')
 
@@ -48,28 +50,45 @@ export const buildService = {
         ? join(buildDir, service.gitRootDir)
         : buildDir
 
-      // ── Step 2+: Build ───────────────────────────────────────────────
-      const buildSystem = service.buildSystem ?? 'railpack'
-
-      if (buildSystem === 'dockerfile') {
-        await log(deployment.id, step(2, TOTAL_STEPS, 'Building Docker image'), 'system')
-        await this.buildWithDockerfile(sourceDir, imageName, service, deployment)
-      } else if (buildSystem === 'static') {
-        await log(deployment.id, step(2, TOTAL_STEPS, 'Installing dependencies'), 'system')
-        await this.buildStaticSite(sourceDir, imageName, service, deployment)
-      } else {
-        await log(deployment.id, step(2, TOTAL_STEPS, 'Detecting framework & generating build plan'), 'system')
-        await this.buildWithRailpack(sourceDir, imageName, service, deployment)
+      // Auto-detect Dockerfile
+      let buildSystem = service.buildSystem ?? 'railpack'
+      if (buildSystem === 'railpack') {
+        const dockerfilePath = join(sourceDir, service.dockerfilePath ?? 'Dockerfile')
+        if (existsSync(dockerfilePath)) {
+          buildSystem = 'dockerfile'
+          await log(deployment.id, `  Dockerfile detected — using Docker build`, 'system')
+        }
       }
 
-      await log(deployment.id, step(TOTAL_STEPS, TOTAL_STEPS, `Image ready: ${imageName}`), 'system')
+      // ── [2/9] Build ───────────────────────────────────────────────────
+      if (buildSystem === 'dockerfile') {
+        await log(deployment.id, step(2, 'Building Docker image'), 'system')
+        await this.buildWithDockerfile(sourceDir, imageName, service, deployment)
+      } else if (buildSystem === 'static') {
+        await log(deployment.id, step(2, 'Installing dependencies'), 'system')
+        await this.buildStaticSite(sourceDir, imageName, service, deployment)
+      } else {
+        await log(deployment.id, step(2, 'Detecting framework & generating build plan'), 'system')
+        try {
+          await this.buildWithRailpack(sourceDir, imageName, service, deployment, envVars)
+        } catch (railpackErr) {
+          // Railpack failed — fall back to auto-generated Dockerfile
+          await log(deployment.id, `\x1b[33m⚠\x1b[0m Railpack build failed, falling back to Dockerfile build`, 'system')
+          await log(deployment.id, `  Reason: ${(railpackErr as Error).message.slice(0, 200)}`, 'system')
+          await log(deployment.id, step(3, 'Auto-generating Dockerfile'), 'system')
+          await this.buildWithFallbackDockerfile(sourceDir, imageName, service, deployment)
+        }
+      }
+
+      // ── [5/9] Image ready ─────────────────────────────────────────────
+      await log(deployment.id, step(5, `Image ready: ${imageName}`), 'system')
 
       return imageName
     } catch (err) {
       await log(deployment.id, `\x1b[31m✗\x1b[0m Build failed: ${(err as Error).message}`, 'stderr')
       throw err
     } finally {
-      try { rmSync(buildDir, { recursive: true, force: true }) } catch {}
+      try { rmSync(buildDir, { recursive: true, force: true }) } catch { }
     }
   },
 
@@ -83,7 +102,7 @@ export const buildService = {
       { stdout: 'pipe', stderr: 'pipe' }
     )
 
-    // Git clone writes progress to stderr
+    // Git clone writes progress to stderr — filter out percentage spam
     const stderrReader = (proc.stderr as ReadableStream).getReader()
     const decoder = new TextDecoder()
     let buf = ''
@@ -94,7 +113,13 @@ export const buildService = {
       const lines = buf.split('\n')
       buf = lines.pop() ?? ''
       for (const line of lines) {
-        if (line.trim()) await log(deployment.id, line.trim(), 'stdout')
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        // Skip noisy percentage progress lines
+        if (/^remote: (Counting|Compressing) objects:/.test(trimmed)) continue
+        if (/^Receiving objects:/.test(trimmed) && !trimmed.includes('done')) continue
+        if (/^Resolving deltas:/.test(trimmed) && !trimmed.includes('done')) continue
+        await log(deployment.id, trimmed, 'stdout')
       }
     }
 
@@ -102,15 +127,25 @@ export const buildService = {
     if (exitCode !== 0) throw new Error(`Git clone failed: ${buf}`)
   },
 
-  async buildWithRailpack(sourceDir: string, imageName: string, service: Service, deployment: Deployment) {
+  async buildWithRailpack(sourceDir: string, imageName: string, service: Service, deployment: Deployment, envVars: Record<string, string> = {}) {
     const args = ['railpack', 'build', sourceDir, '--name', imageName]
     if (service.startCommand) args.push('--start-cmd', service.startCommand)
     if (service.installCommand) args.push('--install-cmd', service.installCommand)
+    // BuildKit layer caching — speeds up repeat builds (railpack uses --cache-key as a namespace)
+    args.push('--cache-key', service.slug)
+    // Pass env vars into build so frameworks like Next.js can access them at build time
+    for (const [key, value] of Object.entries(envVars)) {
+      args.push('--env', `${key}=${value}`)
+    }
 
     const proc = Bun.spawn(args, {
       stdout: 'pipe',
       stderr: 'pipe',
-      env: { ...process.env, BUILDKIT_HOST: process.env.BUILDKIT_HOST ?? 'docker-container://buildkit' },
+      env: {
+        ...process.env,
+        BUILDKIT_HOST: process.env.BUILDKIT_HOST ?? 'docker-container://buildkit',
+        PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}`,
+      },
     })
 
     const reader = (proc.stdout as ReadableStream).getReader()
@@ -195,7 +230,7 @@ export const buildService = {
     }
 
     if (service.buildCommand) {
-      await log(deployment.id, `\x1b[1m\x1b[36m[3/4]\x1b[0m \x1b[1mRunning build command\x1b[0m`, 'system')
+      await log(deployment.id, step(3, 'Building application'), 'system')
       await log(deployment.id, `  $ ${service.buildCommand}`, 'system')
       const build = Bun.spawn(service.buildCommand.split(' '), {
         cwd: sourceDir,
@@ -207,6 +242,7 @@ export const buildService = {
       await log(deployment.id, `\x1b[32m✓\x1b[0m Build complete`, 'system')
     }
 
+    await log(deployment.id, step(4, 'Generating container image'), 'system')
     const publishDir = service.publishDirectory ?? 'dist'
     const dockerfileContent = `FROM nginx:alpine\nCOPY ${publishDir}/ /usr/share/nginx/html/\nEXPOSE 80`
     await Bun.write(join(sourceDir, 'Dockerfile.highway-static'), dockerfileContent)
@@ -230,5 +266,95 @@ export const buildService = {
     })
 
     await log(deployment.id, `\x1b[32m✓\x1b[0m Static site image built: ${imageName}`, 'system')
+  },
+
+  async buildWithFallbackDockerfile(sourceDir: string, imageName: string, service: Service, deployment: Deployment) {
+    // Detect the project type from files present
+    const hasPackageJson = existsSync(join(sourceDir, 'package.json'))
+    const hasNextConfig = existsSync(join(sourceDir, 'next.config.js')) || existsSync(join(sourceDir, 'next.config.mjs')) || existsSync(join(sourceDir, 'next.config.ts'))
+    const hasYarnLock = existsSync(join(sourceDir, 'yarn.lock'))
+    const hasBunLock = existsSync(join(sourceDir, 'bun.lock')) || existsSync(join(sourceDir, 'bun.lockb'))
+    const hasPnpmLock = existsSync(join(sourceDir, 'pnpm-lock.yaml'))
+    const hasRequirements = existsSync(join(sourceDir, 'requirements.txt'))
+
+    let dockerfileContent: string
+    const port = service.port ?? 3000
+
+    if (hasNextConfig && hasPackageJson) {
+      await log(deployment.id, `  Detected: Next.js`, 'system')
+      const pm = hasBunLock ? 'bun' : hasYarnLock ? 'yarn' : hasPnpmLock ? 'pnpm' : 'npm'
+      const install = pm === 'bun' ? 'bun install --frozen-lockfile' : pm === 'yarn' ? 'yarn install --frozen-lockfile' : pm === 'pnpm' ? 'npm i -g pnpm && pnpm install --frozen-lockfile' : 'npm ci'
+      const lockfile = pm === 'bun' ? 'bun.lock*' : pm === 'yarn' ? 'yarn.lock' : pm === 'pnpm' ? 'pnpm-lock.yaml' : 'package-lock.json*'
+      dockerfileContent = `FROM node:20-alpine
+WORKDIR /app
+COPY package.json ${lockfile} ./
+RUN ${install}
+COPY . .
+RUN npm run build
+EXPOSE ${port}
+ENV PORT=${port} NODE_ENV=production
+CMD ["npm", "start"]`
+    } else if (hasRequirements) {
+      await log(deployment.id, `  Detected: Python`, 'system')
+      dockerfileContent = `FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE ${port}
+ENV PORT=${port}
+CMD ["python", "app.py"]`
+    } else if (hasPackageJson) {
+      await log(deployment.id, `  Detected: Node.js`, 'system')
+      const pm = hasBunLock ? 'bun' : hasYarnLock ? 'yarn' : hasPnpmLock ? 'pnpm' : 'npm'
+      const install = pm === 'bun' ? 'bun install --frozen-lockfile' : pm === 'yarn' ? 'yarn install --frozen-lockfile' : pm === 'pnpm' ? 'npm i -g pnpm && pnpm install --frozen-lockfile' : 'npm ci'
+      const lockfile = pm === 'bun' ? 'bun.lock*' : pm === 'yarn' ? 'yarn.lock' : pm === 'pnpm' ? 'pnpm-lock.yaml' : 'package-lock.json*'
+      const startCmd = service.startCommand ?? 'npm start'
+      dockerfileContent = `FROM node:20-alpine
+WORKDIR /app
+COPY package.json ${lockfile} ./
+RUN ${install}
+COPY . .
+RUN npm run build 2>/dev/null || true
+EXPOSE ${port}
+ENV PORT=${port} NODE_ENV=production
+CMD ${JSON.stringify(startCmd.split(' '))}`
+    } else {
+      throw new Error('Cannot detect project type — no package.json, requirements.txt, or Dockerfile found')
+    }
+
+    await log(deployment.id, step(4, 'Building container image from generated Dockerfile'), 'system')
+
+    const dockerfilePath = join(sourceDir, 'Dockerfile.highway-fallback')
+    await Bun.write(dockerfilePath, dockerfileContent)
+
+    const tar = await import('tar-fs')
+    const tarStream = tar.pack(sourceDir)
+    const buildStream = await docker.buildImage(tarStream as any, {
+      t: imageName,
+      dockerfile: 'Dockerfile.highway-fallback',
+    })
+
+    await new Promise<void>((resolve, reject) => {
+      docker.modem.followProgress(
+        buildStream,
+        (err: any) => (err ? reject(err) : resolve()),
+        async (event: any) => {
+          if (event.error) {
+            await log(deployment.id, event.error.trim(), 'stderr')
+            return
+          }
+          const line = event.stream?.trimEnd()
+          if (!line) return
+          if (line.startsWith('Step ') || line.startsWith('#')) {
+            await log(deployment.id, `\x1b[1m${line}\x1b[0m`, 'stdout')
+          } else {
+            await log(deployment.id, line, 'stdout')
+          }
+        }
+      )
+    })
+
+    await log(deployment.id, `\x1b[32m✓\x1b[0m Image built (fallback Dockerfile): ${imageName}`, 'system')
   },
 }

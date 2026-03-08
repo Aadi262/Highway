@@ -23,11 +23,11 @@ export const REDIS_KEYS = {
 
 // ─── Queue Names ─────────────────────────────────────────────────────────────
 export const QUEUES = {
-  BUILD: 'highway:queue:build',
-  DEPLOY: 'highway:queue:deploy',
-  HEALTH_CHECK: 'highway:queue:healthcheck',
-  CLEANUP: 'highway:queue:cleanup',
-  METRICS: 'highway:queue:metrics',
+  BUILD: 'highway-build',
+  DEPLOY: 'highway-deploy',
+  HEALTH_CHECK: 'highway-healthcheck',
+  CLEANUP: 'highway-cleanup',
+  METRICS: 'highway-metrics',
 } as const
 
 // ─── Docker ──────────────────────────────────────────────────────────────────

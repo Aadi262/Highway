@@ -10,7 +10,6 @@ import type { Service, Deployment } from '@highway/db'
 const step = (n: number, total: number, msg: string) =>
   `\x1b[1m\x1b[36m[${n}/${total}]\x1b[0m \x1b[1m${msg}\x1b[0m`
 const ok = (msg: string) => `\x1b[32m✓\x1b[0m ${msg}`
-const fail = (msg: string) => `\x1b[31m✗\x1b[0m ${msg}`
 const info = (msg: string) => `\x1b[2m${msg}\x1b[0m`
 
 const TOTAL = 5
@@ -22,8 +21,17 @@ export const deployService = {
     imageName: string
     envVars: string[]
   }) {
-    const { service, deployment, imageName, envVars } = params
+    const { service, deployment, imageName } = params
     const deployStart = Date.now()
+
+    // Auto-inject system env vars (PORT, NODE_ENV, RAILWAY_ENVIRONMENT)
+    const systemVars = [
+      `PORT=${service.port ?? 3000}`,
+      'NODE_ENV=production',
+      'RAILWAY_ENVIRONMENT=production',
+    ]
+    // User vars override system vars
+    const envVars = [...systemVars, ...params.envVars]
 
     // 1. Ensure project-level Docker network
     await log(deployment.id, step(1, TOTAL, 'Setting up project network'))

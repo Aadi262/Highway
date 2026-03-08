@@ -1,0 +1,4 @@
+import { createDb } from '@highway/db'
+import { env } from './env'
+
+export const db = createDb(env.DATABASE_URL)

@@ -1,0 +1,25 @@
+{
+  "name": "Express + PostgreSQL",
+  "slug": "express-postgres",
+  "description": "Node.js REST API with Express and PostgreSQL database",
+  "icon": "🟢",
+  "category": "framework",
+  "services": [
+    {
+      "name": "api",
+      "type": "app",
+      "source": "docker_image",
+      "dockerImage": "node",
+      "dockerTag": "20-alpine",
+      "port": 3000,
+      "startCommand": "node index.js"
+    },
+    {
+      "name": "db",
+      "type": "database",
+      "dbEngine": "postgres",
+      "dbVersion": "16-alpine",
+      "linkTo": "api"
+    }
+  ]
+}

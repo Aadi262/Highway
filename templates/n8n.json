@@ -1,0 +1,32 @@
+{
+  "name": "n8n",
+  "slug": "n8n",
+  "description": "Workflow automation tool — self-hosted Zapier alternative",
+  "icon": "⚡",
+  "category": "automation",
+  "services": [
+    {
+      "name": "n8n",
+      "type": "app",
+      "source": "docker_image",
+      "dockerImage": "n8nio/n8n",
+      "dockerTag": "latest",
+      "port": 5678,
+      "volumes": [{ "mountPath": "/home/node/.n8n", "sizeGb": 2 }],
+      "env": {
+        "DB_TYPE": "postgresdb",
+        "DB_POSTGRESDB_HOST": "${db.DB_HOST}",
+        "DB_POSTGRESDB_PORT": "${db.DB_PORT}",
+        "DB_POSTGRESDB_DATABASE": "${db.DB_NAME}",
+        "DB_POSTGRESDB_USER": "${db.DB_USER}",
+        "DB_POSTGRESDB_PASSWORD": "${db.DB_PASSWORD}"
+      }
+    },
+    {
+      "name": "db",
+      "type": "database",
+      "dbEngine": "postgres",
+      "linkTo": "n8n"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@highway/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "build": "bun build src/index.ts --target=bun --outdir=dist",
+    "start": "bun run dist/index.js"
+  },
+  "dependencies": {
+    "@highway/db": "workspace:*",
+    "@highway/shared": "workspace:*",
+    "hono": "^4.3.0",
+    "ioredis": "^5.3.2",
+    "bullmq": "^5.7.0",
+    "dockerode": "^4.0.2",
+    "@types/dockerode": "^3.3.29",
+    "tar-fs": "^3.0.6",
+    "jsonwebtoken": "^9.0.2",
+    "@types/jsonwebtoken": "^9.0.6",
+    "zod": "^3.23.0",
+    "@hono/zod-validator": "^0.2.2",
+    "@octokit/rest": "^21.0.1",
+    "slugify": "^1.6.6",
+    "nanoid": "^5.0.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "bun-types": "latest"
+  }
+}

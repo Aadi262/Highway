@@ -1,0 +1,25 @@
+{
+  "name": "Django + PostgreSQL",
+  "slug": "django-postgres",
+  "description": "Python Django web framework with PostgreSQL",
+  "icon": "🐍",
+  "category": "framework",
+  "services": [
+    {
+      "name": "web",
+      "type": "app",
+      "source": "docker_image",
+      "dockerImage": "python",
+      "dockerTag": "3.12-slim",
+      "port": 8000,
+      "startCommand": "gunicorn myproject.wsgi:application --bind 0.0.0.0:8000",
+      "buildCommand": "pip install -r requirements.txt && python manage.py migrate"
+    },
+    {
+      "name": "db",
+      "type": "database",
+      "dbEngine": "postgres",
+      "linkTo": "web"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "Hono + Bun",
+  "slug": "hono-bun",
+  "description": "Ultra-fast API server with Hono framework running on Bun runtime",
+  "icon": "🔥",
+  "category": "framework",
+  "services": [
+    {
+      "name": "api",
+      "type": "app",
+      "source": "docker_image",
+      "dockerImage": "oven/bun",
+      "dockerTag": "latest",
+      "port": 3000,
+      "startCommand": "bun run src/index.ts"
+    }
+  ]
+}

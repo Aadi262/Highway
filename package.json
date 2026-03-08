@@ -1,0 +1,21 @@
+{
+  "name": "highway",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "db:generate": "turbo run db:generate --filter=@highway/db",
+    "db:migrate": "turbo run db:migrate --filter=@highway/db",
+    "db:studio": "turbo run db:studio --filter=@highway/db"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "bun": ">=1.1.0"
+  }
+}

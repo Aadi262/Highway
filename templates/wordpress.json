@@ -1,0 +1,31 @@
+{
+  "name": "WordPress",
+  "slug": "wordpress",
+  "description": "WordPress CMS with MySQL database and persistent storage",
+  "icon": "📝",
+  "category": "cms",
+  "services": [
+    {
+      "name": "wordpress",
+      "type": "app",
+      "source": "docker_image",
+      "dockerImage": "wordpress",
+      "dockerTag": "latest",
+      "port": 80,
+      "volumes": [{ "mountPath": "/var/www/html", "sizeGb": 5 }],
+      "env": {
+        "WORDPRESS_DB_HOST": "${db.DB_HOST}:${db.DB_PORT}",
+        "WORDPRESS_DB_USER": "${db.DB_USER}",
+        "WORDPRESS_DB_PASSWORD": "${db.DB_PASSWORD}",
+        "WORDPRESS_DB_NAME": "${db.DB_NAME}"
+      }
+    },
+    {
+      "name": "db",
+      "type": "database",
+      "dbEngine": "mysql",
+      "dbVersion": "8.4",
+      "linkTo": "wordpress"
+    }
+  ]
+}

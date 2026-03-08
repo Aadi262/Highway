@@ -40,6 +40,15 @@ export default function ProjectPage() {
 
   useEffect(() => { load() }, [projectId])
 
+  // Poll every 3s while any service is in a transient state
+  useEffect(() => {
+    const ACTIVE = ['building', 'queued', 'deploying']
+    const hasActive = project?.services?.some((s: any) => ACTIVE.includes(s.status))
+    if (!hasActive) return
+    const interval = setInterval(load, 3000)
+    return () => clearInterval(interval)
+  }, [project])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">

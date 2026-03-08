@@ -6,7 +6,8 @@ import { eq } from 'drizzle-orm'
 
 export async function authMiddleware(c: Context, next: Next) {
   const authHeader = c.req.header('Authorization')
-  const token = authHeader?.replace('Bearer ', '')
+  // Also accept ?token= for SSE streams (EventSource cannot set headers)
+  const token = authHeader?.replace('Bearer ', '') ?? c.req.query('token')
 
   if (!token) {
     return c.json({ error: 'Unauthorized' }, 401)

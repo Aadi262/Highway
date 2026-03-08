@@ -33,3 +33,10 @@ packages/db/drizzle/
 .vscode/
 .idea/
 *.swp
+
+# Local dev config (never commit)
+apps/api/.env
+apps/web/.env.local
+local.ports.md
+plan.md
+vps.md

@@ -6,10 +6,13 @@ import { useAuthStore } from '../store'
 import { auth } from '../api'
 
 export function useAuth(requireAuth = true) {
-  const { token, user, setUser, logout } = useAuthStore()
+  const { token, user, _hasHydrated, setUser, logout } = useAuthStore()
   const router = useRouter()
 
   useEffect(() => {
+    // Wait for Zustand to rehydrate from localStorage before making decisions
+    if (!_hasHydrated) return
+
     if (!token && requireAuth) {
       router.push('/login')
       return
@@ -20,7 +23,8 @@ export function useAuth(requireAuth = true) {
         router.push('/login')
       })
     }
-  }, [token, user, requireAuth, router, setUser, logout])
+  }, [token, user, _hasHydrated, requireAuth, router, setUser, logout])
 
-  return { user, token, logout, isLoading: !!token && !user }
+  // Show loading until hydrated, or while fetching user
+  return { user, token, logout, isLoading: !_hasHydrated || (!!token && !user) }
 }

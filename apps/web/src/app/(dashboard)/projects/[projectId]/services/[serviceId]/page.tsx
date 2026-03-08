@@ -277,8 +277,10 @@ function EnvEditorWithDbLink({ serviceId, projectId }: { serviceId: string; proj
 }
 
 function ServiceSettings({ service, onUpdate }: { service: any; onUpdate: () => void }) {
+  const router = useRouter()
   const [autoDeploy, setAutoDeploy] = useState(service.autoDeploy)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   async function save() {
     setSaving(true)
@@ -334,8 +336,24 @@ function ServiceSettings({ service, onUpdate }: { service: any; onUpdate: () => 
       {/* Danger zone */}
       <div className="bg-surface border border-red-500/20 rounded-lg p-5 space-y-3">
         <h2 className="text-sm font-medium text-red-400">Danger Zone</h2>
-        <p className="text-xs text-muted-foreground">Permanently delete this service and all its data.</p>
-        <button className="px-4 py-2 text-sm border border-red-500/30 text-red-400 hover:bg-red-500/10 rounded transition-colors">
+        <p className="text-xs text-muted-foreground">Permanently delete this service, its container, and all deployment history.</p>
+        <button
+          onClick={async () => {
+            if (!confirm(`Delete service "${service.name}"? This cannot be undone.`)) return
+            setDeleting(true)
+            try {
+              await servicesApi.delete(service.id)
+              toast.success('Service deleted')
+              router.push(`/projects/${service.projectId}`)
+            } catch (e: any) {
+              toast.error(e.message)
+              setDeleting(false)
+            }
+          }}
+          disabled={deleting}
+          className="flex items-center gap-2 px-4 py-2 text-sm border border-red-500/30 text-red-400 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
+        >
+          {deleting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
           Delete Service
         </button>
       </div>

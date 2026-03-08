@@ -123,13 +123,13 @@ export function AddServiceModal({ projectId, onClose, onCreated }: Props) {
       const service = await servicesApi.create(projectId, {
         name: form.name,
         type: form.type,
-        gitRepoId: selectedRepo.id,
+        gitRepoId: String(selectedRepo.id),
         gitRepoUrl: selectedRepo.cloneUrl,
         gitRepoName: selectedRepo.fullName,
         gitBranch: form.branch,
         buildSystem: form.buildSystem,
         port: form.port,
-        rootDirectory: form.rootDirectory,
+        gitRootDir: form.rootDirectory,
         autoDeploy: form.autoDeploy,
         healthCheckPath: form.healthCheckPath || undefined,
       })

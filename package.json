@@ -2,7 +2,11 @@
   "name": "highway",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "packageManager": "bun@1.3.10",
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
@@ -10,12 +14,14 @@
     "db:migrate": "turbo run db:migrate --filter=@highway/db",
     "db:studio": "turbo run db:studio --filter=@highway/db"
   },
+  "dependencies": {
+    "drizzle-orm": "0.45.1"
+  },
+  "overrides": {
+    "drizzle-orm": "0.45.1"
+  },
   "devDependencies": {
     "turbo": "^2.0.0",
     "typescript": "^5.4.0"
-  },
-  "engines": {
-    "node": ">=20.0.0",
-    "bun": ">=1.1.0"
   }
 }

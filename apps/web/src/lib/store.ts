@@ -11,9 +11,11 @@ interface User {
 interface AuthStore {
   token: string | null
   user: User | null
+  _hasHydrated: boolean
   setToken: (token: string) => void
   setUser: (user: User) => void
   logout: () => void
+  setHasHydrated: (v: boolean) => void
 }
 
 export const useAuthStore = create<AuthStore>()(
@@ -21,6 +23,7 @@ export const useAuthStore = create<AuthStore>()(
     (set) => ({
       token: null,
       user: null,
+      _hasHydrated: false,
       setToken: (token) => {
         set({ token })
         localStorage.setItem('highway_token', token)
@@ -30,10 +33,14 @@ export const useAuthStore = create<AuthStore>()(
         localStorage.removeItem('highway_token')
         set({ token: null, user: null })
       },
+      setHasHydrated: (v) => set({ _hasHydrated: v }),
     }),
     {
       name: 'highway-auth',
       partialize: (state) => ({ token: state.token, user: state.user }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true)
+      },
     }
   )
 )

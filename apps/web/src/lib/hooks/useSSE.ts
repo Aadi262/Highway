@@ -15,9 +15,14 @@ export function useSSELogs(serviceId: string, deploymentId?: string, maxLines = 
     const es = createLogStream(serviceId, deploymentId)
     esRef.current = es
 
+    const seen = new Set<string>()
+
     es.addEventListener('log', (e) => {
       try {
         const entry = JSON.parse(e.data) as LogEntry
+        const key = `${entry.timestamp}|${entry.stream}|${entry.line}`
+        if (seen.has(key)) return
+        seen.add(key)
         setLogs((prev) => {
           const next = [...prev, entry]
           return next.length > maxLines ? next.slice(-maxLines) : next

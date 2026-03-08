@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { gitApi, servicesApi } from '@/lib/api'
+import { gitApi, servicesApi, envApi } from '@/lib/api'
 import {
   X,
   Loader2,
@@ -15,6 +15,9 @@ import {
   ChevronRight,
   Rocket,
   FolderOpen,
+  Plus,
+  Trash2,
+  ClipboardPaste,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -86,6 +89,32 @@ export function AddServiceModal({ projectId, onClose, onCreated }: Props) {
     type: 'web',
   })
 
+  const [envRows, setEnvRows] = useState<{ key: string; value: string }[]>([])
+
+  function addEnvRow() {
+    setEnvRows((r) => [...r, { key: '', value: '' }])
+  }
+
+  function removeEnvRow(i: number) {
+    setEnvRows((r) => r.filter((_, idx) => idx !== i))
+  }
+
+  function updateEnvRow(i: number, field: 'key' | 'value', val: string) {
+    setEnvRows((r) => r.map((row, idx) => idx === i ? { ...row, [field]: val } : row))
+  }
+
+  function pasteEnvVars(text: string) {
+    const parsed: { key: string; value: string }[] = []
+    for (const line of text.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eq = trimmed.indexOf('=')
+      if (eq < 1) continue
+      parsed.push({ key: trimmed.slice(0, eq).trim(), value: trimmed.slice(eq + 1).trim() })
+    }
+    if (parsed.length > 0) setEnvRows((r) => [...r, ...parsed])
+  }
+
   useEffect(() => {
     gitApi
       .repos()
@@ -133,6 +162,13 @@ export function AddServiceModal({ projectId, onClose, onCreated }: Props) {
         autoDeploy: form.autoDeploy,
         healthCheckPath: form.healthCheckPath || undefined,
       })
+      // Save env vars before deploying
+      const validVars = envRows.filter((r) => r.key.trim())
+      if (validVars.length > 0) {
+        const vars: Record<string, string> = {}
+        for (const { key, value } of validVars) vars[key.trim()] = value
+        await envApi.set(service.id, vars)
+      }
       // Immediately trigger deploy and get deploymentId for live log redirect
       const deployRes = await servicesApi.deploy(service.id).catch(() => null)
       toast.success(`Deploying "${form.name}" — opening live logs`)
@@ -464,6 +500,74 @@ export function AddServiceModal({ projectId, onClose, onCreated }: Props) {
                       )}
                     />
                   </button>
+                </div>
+
+                {/* Environment Variables */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs text-muted-foreground">Environment Variables</label>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={async () => {
+                          try {
+                            const text = await navigator.clipboard.readText()
+                            pasteEnvVars(text)
+                          } catch {
+                            toast.error('Clipboard read failed — paste manually')
+                          }
+                        }}
+                        className="flex items-center gap-1 px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground border border-border hover:border-white/20 rounded transition-all"
+                        title="Paste from clipboard (KEY=VALUE format)"
+                      >
+                        <ClipboardPaste className="w-3 h-3" />
+                        Paste .env
+                      </button>
+                      <button
+                        onClick={addEnvRow}
+                        className="flex items-center gap-1 px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground border border-border hover:border-white/20 rounded transition-all"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Add
+                      </button>
+                    </div>
+                  </div>
+
+                  {envRows.length === 0 ? (
+                    <button
+                      onClick={addEnvRow}
+                      className="w-full py-3 border border-dashed border-[#1e1e1e] rounded-lg text-[11px] text-muted-foreground hover:border-accent/30 hover:text-accent/70 transition-all text-center"
+                    >
+                      + Add environment variable
+                    </button>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {envRows.map((row, i) => (
+                        <div key={i} className="flex gap-1.5 items-center">
+                          <input
+                            value={row.key}
+                            onChange={(e) => updateEnvRow(i, 'key', e.target.value)}
+                            placeholder="KEY"
+                            className="w-2/5 bg-[#0a0a0a] border border-[#1e1e1e] rounded px-2 py-1.5 text-xs outline-none focus:border-accent/50 font-mono transition-colors"
+                          />
+                          <input
+                            value={row.value}
+                            onChange={(e) => updateEnvRow(i, 'value', e.target.value)}
+                            placeholder="value"
+                            className="flex-1 bg-[#0a0a0a] border border-[#1e1e1e] rounded px-2 py-1.5 text-xs outline-none focus:border-accent/50 font-mono transition-colors"
+                          />
+                          <button
+                            onClick={() => removeEnvRow(i)}
+                            className="text-muted-foreground hover:text-red-400 transition-colors p-1 flex-shrink-0"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-muted-foreground mt-1.5">
+                    These are saved before the first deploy.
+                  </p>
                 </div>
               </div>
             </div>

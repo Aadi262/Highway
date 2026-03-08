@@ -193,12 +193,17 @@ export const buildService = {
     })
 
     let step = ''
+    let buildError: string | null = null
     await new Promise<void>((resolve, reject) => {
       docker.modem.followProgress(
         buildStream,
-        (err: any) => (err ? reject(err) : resolve()),
+        (err: any) => {
+          if (err || buildError) reject(new Error(buildError ?? err?.message ?? String(err)))
+          else resolve()
+        },
         async (event: any) => {
           if (event.error) {
+            buildError = event.error.trim()
             await log(deployment.id, event.error.trim(), 'stderr')
             return
           }
@@ -256,11 +261,20 @@ export const buildService = {
       dockerfile: 'Dockerfile.highway-static',
     })
 
+    let staticBuildError: string | null = null
     await new Promise<void>((resolve, reject) => {
       docker.modem.followProgress(
         buildStream,
-        (err: any) => (err ? reject(err) : resolve()),
+        (err: any) => {
+          if (err || staticBuildError) reject(new Error(staticBuildError ?? err?.message ?? String(err)))
+          else resolve()
+        },
         async (event: any) => {
+          if (event.error) {
+            staticBuildError = event.error.trim()
+            await log(deployment.id, event.error.trim(), 'stderr')
+            return
+          }
           const line = event.stream?.trim()
           if (line) await log(deployment.id, line)
         }
@@ -351,12 +365,17 @@ CMD ${JSON.stringify(startCmd.split(' '))}`
       buildargs: buildArgsRecord,
     })
 
+    let fallbackBuildError: string | null = null
     await new Promise<void>((resolve, reject) => {
       docker.modem.followProgress(
         buildStream,
-        (err: any) => (err ? reject(err) : resolve()),
+        (err: any) => {
+          if (err || fallbackBuildError) reject(new Error(fallbackBuildError ?? err?.message ?? String(err)))
+          else resolve()
+        },
         async (event: any) => {
           if (event.error) {
+            fallbackBuildError = event.error.trim()
             await log(deployment.id, event.error.trim(), 'stderr')
             return
           }
